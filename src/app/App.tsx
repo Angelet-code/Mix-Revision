@@ -124,11 +124,11 @@ function createEmptyManualCheckpoint(sessionId: string): ManualCheckpointInput {
 
 function getNoteRows(value: string): number {
   if (!value.trim()) {
-    return 2;
+    return 1;
   }
 
   return Math.max(
-    2,
+    1,
     value.split(/\r?\n/).reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / 22)), 0),
   );
 }
