@@ -630,6 +630,7 @@ textarea {
 }
 
 .sessionFilter {
+  color: var(--text-dark);
   min-width: 190px;
 }
 
@@ -859,7 +860,7 @@ textarea {
   color: #59617f;
   font-weight: 600;
   line-height: 1.35;
-  min-height: 36px;
+  min-height: 40px;
   overflow: hidden;
   overflow-wrap: anywhere;
   resize: none;

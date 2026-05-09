@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, ReactNode, TextareaHTMLAttributes } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -123,17 +123,6 @@ function createEmptyManualCheckpoint(sessionId: string): ManualCheckpointInput {
     category: "other",
     notes: "",
   };
-}
-
-function getNoteRows(value: string): number {
-  if (!value.trim()) {
-    return 1;
-  }
-
-  return Math.max(
-    1,
-    value.split(/\r?\n/).reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / 22)), 0),
-  );
 }
 
 export function App() {
@@ -268,7 +257,7 @@ export function App() {
       items: sortChecklistItems([...existingItems, ...items]),
     });
     setSelectedSessionId(sessionId);
-    setSessionFilter(sessionId);
+    setSessionFilter("all");
     setSessionName(getDefaultRevisionName(existingSessions.length + 1));
     setActiveView("checklist");
   }
@@ -377,7 +366,7 @@ export function App() {
       sessions: [...activeProject.sessions, session],
     });
     setSelectedSessionId(session.id);
-    setSessionFilter(session.id);
+    setSessionFilter("all");
     setSessionName(getDefaultRevisionName(activeProject.sessions.length + 2));
 
     return session.id;
@@ -436,7 +425,7 @@ export function App() {
       items: sortChecklistItems([...activeProject.items, item]),
     });
     setSelectedSessionId(sessionId);
-    setSessionFilter(sessionId);
+    setSessionFilter("all");
   }
 
   function deleteItem(itemId: string) {
@@ -889,6 +878,26 @@ function StatPill({
   );
 }
 
+function AutoResizeTextarea({
+  value,
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const textarea = ref.current;
+
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [value]);
+
+  return <textarea {...props} ref={ref} rows={1} value={value} />;
+}
+
 function ProjectListEntry({
   active,
   project,
@@ -1148,13 +1157,12 @@ function ChecklistTable({
                   aria-label="Descripcion"
                 />
 
-                <textarea
+                <AutoResizeTextarea
                   className="notesInput"
                   value={item.notes}
                   onChange={(event) => onUpdate(item.id, { notes: event.target.value })}
                   placeholder="Notas"
                   aria-label="Notas"
-                  rows={getNoteRows(item.notes)}
                 />
 
                 <button
