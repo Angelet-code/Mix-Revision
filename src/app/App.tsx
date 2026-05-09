@@ -12,7 +12,6 @@ import {
   Gauge,
   Layers3,
   ListFilter,
-  Music2,
   Plus,
   RotateCcw,
   SlidersHorizontal,
@@ -26,6 +25,8 @@ import { formatDuration, parseTimecode } from "../features/feedback/timecode";
 import { loadProjects, saveProjects } from "../features/projects/projectStorage";
 import {
   categoryLabels,
+  instrumentCategories,
+  mixPartCategories,
   type ChecklistCategory,
   type ChecklistItem,
   type FeedbackSession,
@@ -65,6 +66,8 @@ const emptyDraft: ProjectDraft = {
   barOffset: 0,
   beatsPerBar: 4,
 };
+
+const revisionLogoSrc = "./revision-logo-transparent.png";
 
 function getDefaultRevisionName(index: number): string {
   return `Revision nº ${index}`;
@@ -480,11 +483,11 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brandMark">
-            <Music2 aria-hidden="true" />
+            <img src={revisionLogoSrc} alt="" aria-hidden="true" />
           </div>
           <div>
-            <strong>Mixing Checklist</strong>
-            <span>Revisiones de mezcla</span>
+            <strong>Revision</strong>
+            <span>Review your mix</span>
           </div>
         </div>
 
@@ -841,7 +844,7 @@ export function App() {
         ) : (
           <div className="emptyState">
             <div className="brandMark large">
-              <Music2 aria-hidden="true" />
+              <img src={revisionLogoSrc} alt="" aria-hidden="true" />
             </div>
             <h1>Crea tu primer proyecto</h1>
             <p>Introduce cancion, artista y BPM para convertir feedback en una lista de mezcla clara.</p>
@@ -1093,7 +1096,6 @@ function ChecklistTable({
       ) : (
         <div className="taskList">
           {visibleItems.map((item) => {
-            const itemRevisionLabel = getRevisionLabel(sessions, item.sessionId);
             const hasManualTime = item.source === "manual" && item.originalTimecode === "Manual";
 
             return (
@@ -1123,15 +1125,21 @@ function ChecklistTable({
                     onChange={(event) => onUpdate(item.id, { category: event.target.value as ChecklistCategory })}
                     aria-label="Categoria"
                   >
-                    {Object.entries(categoryLabels).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
+                    {instrumentCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {categoryLabels[category]}
+                      </option>
+                    ))}
+                    <option disabled value="">
+                      ----------
+                    </option>
+                    {mixPartCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {categoryLabels[category]}
                       </option>
                     ))}
                   </select>
                 </div>
-
-                <div className="sessionTag">{itemRevisionLabel}</div>
 
                 <input
                   className="descriptionInput"
@@ -1194,9 +1202,17 @@ function ChecklistTable({
             }
             aria-label="Categoria"
           >
-            {Object.entries(categoryLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
+            {instrumentCategories.map((category) => (
+              <option key={category} value={category}>
+                {categoryLabels[category]}
+              </option>
+            ))}
+            <option disabled value="">
+              ----------
+            </option>
+            {mixPartCategories.map((category) => (
+              <option key={category} value={category}>
+                {categoryLabels[category]}
               </option>
             ))}
           </select>

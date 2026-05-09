@@ -5,6 +5,11 @@ export type ChecklistCategory =
   | "voice"
   | "guitar"
   | "acoustic"
+  | "drums"
+  | "bass"
+  | "piano"
+  | "synth"
+  | "mixbus"
   | "arrangement"
   | "editing"
   | "noise"
@@ -53,8 +58,31 @@ export const categoryLabels: Record<ChecklistCategory, string> = {
   voice: "Voz",
   guitar: "Guitarra",
   acoustic: "Acustica",
+  drums: "Bateria",
+  bass: "Bajo",
+  piano: "Piano",
+  synth: "Sinte",
   arrangement: "Arreglo",
   editing: "Edicion",
   noise: "Ruido",
+  mixbus: "Mixbus",
   other: "Otro",
 };
+
+export const instrumentCategories: ChecklistCategory[] = [
+  "voice",
+  "guitar",
+  "acoustic",
+  "drums",
+  "bass",
+  "piano",
+  "synth",
+];
+
+export const mixPartCategories: ChecklistCategory[] = [
+  "arrangement",
+  "editing",
+  "noise",
+  "mixbus",
+  "other",
+];

@@ -112,6 +112,26 @@ function inferCategory(description: string): ChecklistCategory {
     return "guitar";
   }
 
+  if (normalized.includes("bateria") || normalized.includes("baterÃ­a") || normalized.includes("bombo") || normalized.includes("caja")) {
+    return "drums";
+  }
+
+  if (normalized.includes("bajo")) {
+    return "bass";
+  }
+
+  if (normalized.includes("piano")) {
+    return "piano";
+  }
+
+  if (normalized.includes("sinte") || normalized.includes("synth")) {
+    return "synth";
+  }
+
+  if (normalized.includes("mixbus") || normalized.includes("master") || normalized.includes("bus")) {
+    return "mixbus";
+  }
+
   if (normalized.includes("arreglo")) {
     return "arrangement";
   }
