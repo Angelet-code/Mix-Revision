@@ -1096,7 +1096,7 @@ function ChecklistTable({
       ) : (
         <div className="taskList">
           {visibleItems.map((item) => {
-            const hasManualTime = item.source === "manual" && item.originalTimecode === "Manual";
+            const hasTimecode = item.originalTimecode !== "Manual" && item.originalTimecode !== "Sin tiempo";
 
             return (
               <article key={item.id} className={`taskRow ${item.status === "done" ? "doneRow" : ""}`}>
@@ -1110,13 +1110,13 @@ function ChecklistTable({
 
                 <div className="timeCell">
                   <strong>{item.originalTimecode}</strong>
-                  <span>{hasManualTime ? "sin tiempo" : formatDuration(item.seconds)}</span>
+                  <span>{hasTimecode ? formatDuration(item.seconds) : "sin tiempo"}</span>
                 </div>
 
                 <div className="barCell">
                   <Gauge aria-hidden="true" />
-                  <span>C{item.bar ?? "-"}</span>
-                  <small>P{item.beat ?? "-"}</small>
+                  <span>Compás {item.bar ?? "-"}</span>
+                  <small>Pulso {item.beat ?? "-"}</small>
                 </div>
 
                 <div className={`categoryBadge ${item.category}`}>

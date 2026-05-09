@@ -5,37 +5,38 @@ import { parseTimecode } from "./timecode";
 export type ParsedFeedbackItem = {
   originalTimecode: string;
   seconds: number;
+  hasTimecode: boolean;
   description: string;
   category: ChecklistCategory;
   fingerprint: string;
 };
 
-const linePattern = /^\s*(\d{1,2}:\d{2}|\d{1,2}:\d{1,2}:\d{2}|\d{1,3}\.\d{2})\s*,?\s*(.+?)\s*$/;
+const timecodePattern = /(?:\d{1,2}:)?\d{1,2}:\d{2}|\d{1,3}\.\d{2}/g;
 
 export function parseFeedback(text: string): ParsedFeedbackItem[] {
   return text
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .flatMap(splitFeedbackLine)
     .filter(Boolean)
-    .map((line) => {
-      const match = line.match(linePattern);
-      if (!match) {
+    .map((rawLine) => {
+      const line = cleanFeedbackLine(rawLine);
+      const extracted = extractTimecode(line);
+      const description = cleanDescription(extracted.description);
+
+      if (!description) {
         return null;
       }
-
-      const timecode = parseTimecode(match[1]);
-      if (!timecode) {
-        return null;
-      }
-
-      const description = match[2].trim();
 
       return {
-        originalTimecode: timecode.original,
-        seconds: timecode.seconds,
+        originalTimecode: extracted.timecode?.original ?? "Sin tiempo",
+        seconds: extracted.timecode?.seconds ?? 0,
+        hasTimecode: extracted.timecode !== null,
         description,
         category: inferCategory(description),
-        fingerprint: createFeedbackFingerprint(timecode.seconds, description),
+        fingerprint: createFeedbackFingerprint(
+          extracted.timecode?.seconds ?? null,
+          description,
+        ),
       };
     })
     .filter((item): item is ParsedFeedbackItem => item !== null);
@@ -69,8 +70,8 @@ export function createChecklistItems({
       sessionId,
       originalTimecode: item.originalTimecode,
       seconds: item.seconds,
-      bar: position.bar,
-      beat: position.beat,
+      bar: item.hasTimecode ? position.bar : null,
+      beat: item.hasTimecode ? position.beat : null,
       description: item.description,
       category: item.category,
       status: "pending",
@@ -83,8 +84,77 @@ export function createChecklistItems({
   });
 }
 
-export function createFeedbackFingerprint(seconds: number, description: string): string {
-  return `${seconds}|${normalizeFeedbackText(description)}`;
+export function createFeedbackFingerprint(seconds: number | null, description: string): string {
+  return `${seconds ?? "untimed"}|${normalizeFeedbackText(description)}`;
+}
+
+function splitFeedbackLine(line: string): string[] {
+  const cleaned = cleanFeedbackLine(line);
+
+  if (!cleaned) {
+    return [];
+  }
+
+  const matches = [...cleaned.matchAll(timecodePattern)];
+
+  if (matches.length <= 1) {
+    return [cleaned];
+  }
+
+  return matches
+    .map((match, index) => {
+      const start = match.index ?? 0;
+      const end = matches[index + 1]?.index ?? cleaned.length;
+
+      return cleaned.slice(start, end).trim();
+    })
+    .filter(Boolean);
+}
+
+function cleanFeedbackLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^[-*]+\s*/, "")
+    .replace(/^\d+[.)]\s+/, "")
+    .trim();
+}
+
+function extractTimecode(line: string): {
+  timecode: ReturnType<typeof parseTimecode>;
+  description: string;
+} {
+  const match = timecodePattern.exec(line);
+  timecodePattern.lastIndex = 0;
+
+  if (!match) {
+    return { timecode: null, description: line };
+  }
+
+  const timecode = parseTimecode(match[0]);
+
+  if (!timecode) {
+    return { timecode: null, description: line };
+  }
+
+  const before = cleanTimecodePrefix(line.slice(0, match.index));
+  const after = line.slice((match.index ?? 0) + match[0].length).trim();
+  const description = [before, after].filter(Boolean).join(" ");
+
+  return { timecode, description };
+}
+
+function cleanDescription(description: string): string {
+  return description
+    .replace(/^[,;:.)\]-]+\s*/, "")
+    .replace(/^(?:-|->|=>)\s*/, "")
+    .trim();
+}
+
+function cleanTimecodePrefix(prefix: string): string {
+  return prefix
+    .replace(/^[\s:([@-]+/, "")
+    .replace(/\b(?:en|sobre|around|at|minuto|min|segundo|seg|time|timestamp|marca|parte|revisar|mirar|check)\s*$/i, "")
+    .trim();
 }
 
 function normalizeFeedbackText(description: string): string {

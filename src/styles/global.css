@@ -677,7 +677,7 @@ textarea {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: 38px 86px 84px minmax(112px, 132px) minmax(280px, 1fr) minmax(180px, 0.6fr) 40px;
+  grid-template-columns: 38px 96px 116px minmax(112px, 132px) minmax(260px, 1fr) minmax(180px, 0.6fr) 40px;
   min-height: 66px;
   padding: 10px;
 }
@@ -1008,7 +1008,7 @@ textarea {
 
 @media (max-width: 1400px) {
   .taskRow {
-    grid-template-columns: 38px 76px 70px minmax(108px, 116px) minmax(220px, 1fr) minmax(140px, 0.6fr) 40px;
+    grid-template-columns: 38px 86px 104px minmax(108px, 116px) minmax(200px, 1fr) minmax(140px, 0.6fr) 40px;
   }
 
   .manualCheckpointForm {

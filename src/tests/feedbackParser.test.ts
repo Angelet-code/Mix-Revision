@@ -23,5 +23,58 @@ describe("parseFeedback", () => {
     expect(result[0].category).toBe("voice");
     expect(result[1].category).toBe("noise");
   });
-});
 
+  it("keeps untimed lines as checklist tasks", () => {
+    const result = parseFeedback(`Revisar balance general del estribillo
+- Subir el bajo en el segundo verso
+1) Mirar automatizacion del delay`);
+
+    expect(result).toMatchObject([
+      {
+        originalTimecode: "Sin tiempo",
+        seconds: 0,
+        hasTimecode: false,
+        description: "Revisar balance general del estribillo",
+      },
+      {
+        originalTimecode: "Sin tiempo",
+        seconds: 0,
+        hasTimecode: false,
+        description: "Subir el bajo en el segundo verso",
+        category: "bass",
+      },
+      {
+        originalTimecode: "Sin tiempo",
+        seconds: 0,
+        hasTimecode: false,
+        description: "Mirar automatizacion del delay",
+      },
+    ]);
+  });
+
+  it("accepts flexible timecode placement and multiple tasks per line", () => {
+    const result = parseFeedback(`[0:36] Voz ("veo") buscar otra toma. 1:14 - guitarra acustica revisar otra toma.
+Voz 2:05 demasiado fuerte`);
+
+    expect(result).toMatchObject([
+      {
+        originalTimecode: "0:36",
+        seconds: 36,
+        hasTimecode: true,
+        description: "Voz (\"veo\") buscar otra toma.",
+      },
+      {
+        originalTimecode: "1:14",
+        seconds: 74,
+        hasTimecode: true,
+        description: "guitarra acustica revisar otra toma.",
+      },
+      {
+        originalTimecode: "2:05",
+        seconds: 125,
+        hasTimecode: true,
+        description: "Voz demasiado fuerte",
+      },
+    ]);
+  });
+});
