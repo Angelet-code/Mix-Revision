@@ -36,3 +36,13 @@ npm run build
 ```
 
 La app se guarda inicialmente en `localStorage`, asi que los proyectos quedan en el navegador desde el que se usan.
+
+## Publicacion
+
+El repositorio incluye un workflow de GitHub Actions para publicar en GitHub Pages cada vez que se hace push a `main`.
+
+URL esperada:
+
+```text
+https://angelet-code.github.io/Mix-Revision/
+```
