@@ -42,10 +42,12 @@ function migrateProject(project: Project): Project {
   return {
     ...project,
     sessions,
+    archivedAt: project.archivedAt ?? null,
     items: items.map((item) => ({
       ...item,
       sessionId: item.sessionId ?? legacySessionId,
       fingerprint: item.fingerprint ?? createFeedbackFingerprint(item.seconds, item.description),
+      source: item.source ?? "feedback",
     })),
   };
 }

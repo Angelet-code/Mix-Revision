@@ -64,6 +64,7 @@ type Project = {
   barOffset: number;
   beatsPerBar: number;
   sessions: FeedbackSession[];
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   items: ChecklistItem[];
@@ -89,6 +90,7 @@ type ChecklistItem = {
   status: "pending" | "done";
   notes: string;
   fingerprint: string;
+  source: "feedback" | "manual";
   createdAt: string;
   updatedAt: string;
 };
@@ -190,6 +192,14 @@ Acciones disponibles:
 - Anadir a sesion sin duplicar.
 - Vaciar checklist completo.
 - Borrar una sesion concreta.
+
+## Flujo de revisiones y checkpoints manuales
+
+La UI presenta las sesiones como revisiones numeradas dentro del checklist. Desde esa vista se puede crear una revision nueva, borrar la revision seleccionada y anadir checkpoints manuales sin pasar por ajustes.
+
+Los checkpoints importados llevan `source: "feedback"` y mantienen su huella basada en tiempo + descripcion para deduplicar. Los checkpoints manuales llevan `source: "manual"` y una huella unica `manual|uuid`, por lo que no interfieren con la deduplicacion de feedback pegado.
+
+Los proyectos archivados mantienen todos sus datos y se separan visualmente de los activos mediante `archivedAt`. El borrado de proyecto sigue siendo destructivo y requiere confirmacion.
 
 Futuro:
 

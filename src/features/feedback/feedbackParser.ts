@@ -76,6 +76,7 @@ export function createChecklistItems({
       status: "pending",
       notes: "",
       fingerprint: item.fingerprint,
+      source: "feedback",
       createdAt: now,
       updatedAt: now,
     };

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -16,9 +18,11 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
+import { calculateBarPosition } from "../features/feedback/barCalculator";
 import { createChecklistItems, parseFeedback } from "../features/feedback/feedbackParser";
-import { formatDuration } from "../features/feedback/timecode";
+import { formatDuration, parseTimecode } from "../features/feedback/timecode";
 import { loadProjects, saveProjects } from "../features/projects/projectStorage";
 import {
   categoryLabels,
@@ -46,6 +50,13 @@ type ProjectDraft = Pick<Project, "songName" | "artistName" | "bpm" | "barOffset
 type ActiveView = "checklist" | "import" | "settings";
 type ItemFilter = "all" | "pending" | "done";
 type ImportMode = "new-session" | "replace-session" | "append-deduped";
+type ManualCheckpointInput = {
+  sessionId: string;
+  timecode: string;
+  description: string;
+  category: ChecklistCategory;
+  notes: string;
+};
 
 const emptyDraft: ProjectDraft = {
   songName: "",
@@ -55,9 +66,76 @@ const emptyDraft: ProjectDraft = {
   beatsPerBar: 4,
 };
 
+function getDefaultRevisionName(index: number): string {
+  return `Revision nº ${index}`;
+}
+
+function getProjectCompletion(project: Project): number {
+  if (project.items.length === 0) {
+    return 0;
+  }
+
+  const done = project.items.filter((item) => item.status === "done").length;
+  return Math.round((done / project.items.length) * 100);
+}
+
+function getPreferredProjectId(projects: Project[]): string | null {
+  return projects.find((project) => !project.archivedAt)?.id ?? projects[0]?.id ?? null;
+}
+
+function getRevisionLabel(sessions: FeedbackSession[], sessionId: string): string {
+  const index = sessions.findIndex((session) => session.id === sessionId);
+  return index >= 0 ? getDefaultRevisionName(index + 1) : "Revision";
+}
+
+function getRevisionOptionLabel(sessions: FeedbackSession[], session: FeedbackSession): string {
+  const revisionLabel = getRevisionLabel(sessions, session.id);
+  return session.name && session.name !== revisionLabel
+    ? `${revisionLabel} / ${session.name}`
+    : revisionLabel;
+}
+
+function sortChecklistItems(items: ChecklistItem[]): ChecklistItem[] {
+  return [...items].sort((a, b) => {
+    const aUntimed = a.source === "manual" && a.originalTimecode === "Manual";
+    const bUntimed = b.source === "manual" && b.originalTimecode === "Manual";
+
+    if (aUntimed !== bUntimed) {
+      return aUntimed ? 1 : -1;
+    }
+
+    if (a.seconds !== b.seconds) {
+      return a.seconds - b.seconds;
+    }
+
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+}
+
+function createEmptyManualCheckpoint(sessionId: string): ManualCheckpointInput {
+  return {
+    sessionId,
+    timecode: "",
+    description: "",
+    category: "other",
+    notes: "",
+  };
+}
+
+function getNoteRows(value: string): number {
+  if (!value.trim()) {
+    return 2;
+  }
+
+  return Math.max(
+    2,
+    value.split(/\r?\n/).reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / 22)), 0),
+  );
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>(() => loadProjects());
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => loadProjects()[0]?.id ?? null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => getPreferredProjectId(loadProjects()));
   const [draft, setDraft] = useState<ProjectDraft>(emptyDraft);
   const [feedback, setFeedback] = useState(sampleFeedback);
   const [activeView, setActiveView] = useState<ActiveView>("checklist");
@@ -69,13 +147,18 @@ export function App() {
   const [isCreateOpen, setIsCreateOpen] = useState(() => loadProjects().length === 0);
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
+  const activeProjects = projects.filter((project) => !project.archivedAt);
+  const archivedProjects = projects.filter((project) => project.archivedAt);
   const parsedFeedback = useMemo(() => parseFeedback(feedback), [feedback]);
   const pendingCount = activeProject?.items.filter((item) => item.status === "pending").length ?? 0;
   const doneCount = activeProject?.items.filter((item) => item.status === "done").length ?? 0;
   const totalCount = activeProject?.items.length ?? 0;
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-  const fallbackSessionName = activeProject ? `Feedback #${activeProject.sessions.length + 1}` : "Feedback #1";
-  const targetSessionId = selectedSessionId || activeProject?.sessions[0]?.id || "";
+  const fallbackSessionName = activeProject
+    ? getDefaultRevisionName(activeProject.sessions.length + 1)
+    : getDefaultRevisionName(1);
+  const lastSessionId = activeProject?.sessions[activeProject.sessions.length - 1]?.id ?? "";
+  const targetSessionId = selectedSessionId || lastSessionId;
   const duplicateFingerprints = useMemo(() => {
     if (!activeProject) {
       return new Set<string>();
@@ -97,9 +180,9 @@ export function App() {
   }, [projects]);
 
   useEffect(() => {
-    setSelectedSessionId(activeProject?.sessions[0]?.id ?? "");
+    setSelectedSessionId(activeProject?.sessions[activeProject.sessions.length - 1]?.id ?? "");
     setSessionFilter("all");
-    setSessionName(activeProject ? `Feedback #${activeProject.sessions.length + 1}` : "Feedback #1");
+    setSessionName(activeProject ? getDefaultRevisionName(activeProject.sessions.length + 1) : getDefaultRevisionName(1));
   }, [activeProject?.id]);
 
   function createProject() {
@@ -112,6 +195,7 @@ export function App() {
       barOffset: Number(draft.barOffset) || 0,
       beatsPerBar: Number(draft.beatsPerBar) || 4,
       sessions: [],
+      archivedAt: null,
       createdAt: now,
       updatedAt: now,
       items: [],
@@ -178,16 +262,16 @@ export function App() {
 
     updateProject(activeProject.id, {
       sessions: existingSessions,
-      items: [...existingItems, ...items].sort((a, b) => a.seconds - b.seconds),
+      items: sortChecklistItems([...existingItems, ...items]),
     });
     setSelectedSessionId(sessionId);
     setSessionFilter(sessionId);
-    setSessionName(`Feedback #${activeProject.sessions.length + 2}`);
+    setSessionName(getDefaultRevisionName(existingSessions.length + 1));
     setActiveView("checklist");
   }
 
   function resetChecklist(projectId: string) {
-    if (!window.confirm("Vaciar todas las tareas y sesiones de feedback de esta cancion?")) {
+    if (!window.confirm("Vaciar todas las tareas y revisiones de esta cancion?")) {
       return;
     }
 
@@ -197,7 +281,7 @@ export function App() {
     });
     setSessionFilter("all");
     setSelectedSessionId("");
-    setSessionName("Feedback #1");
+    setSessionName(getDefaultRevisionName(1));
   }
 
   function deleteSession(sessionId: string) {
@@ -205,16 +289,20 @@ export function App() {
       return;
     }
 
-    if (!window.confirm("Borrar esta sesion y todos sus puntos de feedback?")) {
+    const revisionLabel = getRevisionLabel(activeProject.sessions, sessionId);
+
+    if (!window.confirm(`Borrar ${revisionLabel} y todos sus checkpoints?`)) {
       return;
     }
+
+    const nextSessionId = activeProject.sessions.find((session) => session.id !== sessionId)?.id ?? "";
 
     updateProject(activeProject.id, {
       sessions: activeProject.sessions.filter((session) => session.id !== sessionId),
       items: activeProject.items.filter((item) => item.sessionId !== sessionId),
     });
-    setSessionFilter("all");
-    setSelectedSessionId(activeProject.sessions.find((session) => session.id !== sessionId)?.id ?? "");
+    setSessionFilter(nextSessionId || "all");
+    setSelectedSessionId(nextSessionId);
   }
 
   function updateProject(projectId: string, patch: Partial<Project>) {
@@ -268,12 +356,121 @@ export function App() {
     });
   }
 
+  function createRevision(): string {
+    if (!activeProject) {
+      return "";
+    }
+
+    const now = new Date().toISOString();
+    const session: FeedbackSession = {
+      id: crypto.randomUUID(),
+      name: getDefaultRevisionName(activeProject.sessions.length + 1),
+      sourceText: "",
+      importedAt: now,
+      notes: "",
+    };
+
+    updateProject(activeProject.id, {
+      sessions: [...activeProject.sessions, session],
+    });
+    setSelectedSessionId(session.id);
+    setSessionFilter(session.id);
+    setSessionName(getDefaultRevisionName(activeProject.sessions.length + 2));
+
+    return session.id;
+  }
+
+  function addManualCheckpoint(input: ManualCheckpointInput) {
+    if (!activeProject) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    let sessionId = input.sessionId || activeProject.sessions[activeProject.sessions.length - 1]?.id || "";
+    let sessions = activeProject.sessions;
+
+    if (!sessionId) {
+      const session: FeedbackSession = {
+        id: crypto.randomUUID(),
+        name: getDefaultRevisionName(activeProject.sessions.length + 1),
+        sourceText: "",
+        importedAt: now,
+        notes: "",
+      };
+      sessionId = session.id;
+      sessions = [...sessions, session];
+    }
+
+    const parsedTimecode = input.timecode.trim() ? parseTimecode(input.timecode) : null;
+    const position = parsedTimecode
+      ? calculateBarPosition({
+          timestampSeconds: parsedTimecode.seconds,
+          bpm: activeProject.bpm,
+          beatsPerBar: activeProject.beatsPerBar,
+          barOffset: activeProject.barOffset,
+        })
+      : { bar: null, beat: null };
+
+    const item: ChecklistItem = {
+      id: crypto.randomUUID(),
+      sessionId,
+      originalTimecode: parsedTimecode?.original ?? "Manual",
+      seconds: parsedTimecode?.seconds ?? 0,
+      bar: position.bar,
+      beat: position.beat,
+      description: input.description.trim() || "Correccion manual",
+      category: input.category,
+      status: "pending",
+      notes: input.notes.trim(),
+      fingerprint: `manual|${crypto.randomUUID()}`,
+      source: "manual",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    updateProject(activeProject.id, {
+      sessions,
+      items: sortChecklistItems([...activeProject.items, item]),
+    });
+    setSelectedSessionId(sessionId);
+    setSessionFilter(sessionId);
+  }
+
+  function deleteItem(itemId: string) {
+    if (!activeProject) {
+      return;
+    }
+
+    updateProject(activeProject.id, {
+      items: activeProject.items.filter((item) => item.id !== itemId),
+    });
+  }
+
+  function archiveProject(projectId: string) {
+    updateProject(projectId, {
+      archivedAt: new Date().toISOString(),
+    });
+  }
+
+  function restoreProject(projectId: string) {
+    updateProject(projectId, {
+      archivedAt: null,
+    });
+    setActiveProjectId(projectId);
+  }
+
   function deleteProject(projectId: string) {
+    const project = projects.find((project) => project.id === projectId);
+
+    if (!window.confirm(`Eliminar "${project?.songName ?? "este proyecto"}"? Esta accion no se puede deshacer.`)) {
+      return;
+    }
+
     const nextProjects = projects.filter((project) => project.id !== projectId);
     setProjects(nextProjects);
 
     if (activeProjectId === projectId) {
-      setActiveProjectId(nextProjects[0]?.id ?? null);
+      setActiveProjectId(getPreferredProjectId(nextProjects));
       setIsCreateOpen(nextProjects.length === 0);
     }
   }
@@ -287,7 +484,7 @@ export function App() {
           </div>
           <div>
             <strong>Mixing Checklist</strong>
-            <span>Sesion de correcciones</span>
+            <span>Revisiones de mezcla</span>
           </div>
         </div>
 
@@ -352,30 +549,42 @@ export function App() {
         )}
 
         <section className="projectList" aria-label="Proyectos">
-          <div className="sidebarLabel">Proyectos</div>
-          {projects.map((project) => {
-            const pending = project.items.filter((item) => item.status === "pending").length;
-            const done = project.items.filter((item) => item.status === "done").length;
+          <div className="sidebarLabel">Proyectos activos</div>
+          {activeProjects.length === 0 && <p className="sidebarEmpty">No hay proyectos activos.</p>}
+          {activeProjects.map((project) => (
+            <ProjectListEntry
+              active={project.id === activeProjectId}
+              key={project.id}
+              project={project}
+              onArchive={() => archiveProject(project.id)}
+              onDelete={() => deleteProject(project.id)}
+              onRestore={() => restoreProject(project.id)}
+              onSelect={() => {
+                setActiveProjectId(project.id);
+                setActiveView("checklist");
+              }}
+            />
+          ))}
 
-            return (
-              <button
-                className={`projectListItem ${project.id === activeProjectId ? "active" : ""}`}
-                key={project.id}
-                onClick={() => {
-                  setActiveProjectId(project.id);
-                  setActiveView("checklist");
-                }}
-              >
-                <span>{project.songName}</span>
-                <small>{project.artistName}</small>
-                <em>
-                  {done}/{project.items.length || 0} hechas · {project.sessions.length} feedbacks
-                  <ChevronRight aria-hidden="true" />
-                </em>
-                {pending > 0 && <b>{pending}</b>}
-              </button>
-            );
-          })}
+          {archivedProjects.length > 0 && (
+            <>
+              <div className="sidebarLabel archivedLabel">Archivados</div>
+              {archivedProjects.map((project) => (
+                <ProjectListEntry
+                  active={project.id === activeProjectId}
+                  key={project.id}
+                  project={project}
+                  onArchive={() => archiveProject(project.id)}
+                  onDelete={() => deleteProject(project.id)}
+                  onRestore={() => restoreProject(project.id)}
+                  onSelect={() => {
+                    setActiveProjectId(project.id);
+                    setActiveView("checklist");
+                  }}
+                />
+              ))}
+            </>
+          )}
         </section>
       </aside>
 
@@ -385,7 +594,10 @@ export function App() {
             <header className="projectHeader">
               <div className="titleBlock">
                 <p className="eyebrow">{activeProject.artistName}</p>
-                <h1>{activeProject.songName}</h1>
+                <div className="titleLine">
+                  <h1>{activeProject.songName}</h1>
+                  {activeProject.archivedAt && <span className="archivedBadge">Archivado</span>}
+                </div>
                 <p>
                   {activeProject.bpm} BPM / {activeProject.beatsPerBar}/4 / offset{" "}
                   {activeProject.barOffset}
@@ -393,6 +605,30 @@ export function App() {
               </div>
 
               <div className="sessionStats">
+                <div className="projectHeaderActions">
+                  <button
+                    className="iconButton"
+                    onClick={() =>
+                      activeProject.archivedAt
+                        ? restoreProject(activeProject.id)
+                        : archiveProject(activeProject.id)
+                    }
+                    title={activeProject.archivedAt ? "Restaurar proyecto" : "Archivar proyecto"}
+                  >
+                    {activeProject.archivedAt ? (
+                      <ArchiveRestore aria-hidden="true" />
+                    ) : (
+                      <Archive aria-hidden="true" />
+                    )}
+                  </button>
+                  <button
+                    className="iconButton danger"
+                    onClick={() => deleteProject(activeProject.id)}
+                    title="Eliminar proyecto"
+                  >
+                    <Trash2 aria-hidden="true" />
+                  </button>
+                </div>
                 <div
                   className="progressDial"
                   style={{ "--progress": `${progress}%` } as CSSProperties}
@@ -402,7 +638,7 @@ export function App() {
                 </div>
                 <StatPill icon={<ClipboardList aria-hidden="true" />} label="Pendientes" value={pendingCount} />
                 <StatPill icon={<CheckCircle2 aria-hidden="true" />} label="Hechas" value={doneCount} />
-                <StatPill icon={<Layers3 aria-hidden="true" />} label="Feedbacks" value={activeProject.sessions.length} />
+                <StatPill icon={<Layers3 aria-hidden="true" />} label="Revisiones" value={activeProject.sessions.length} />
               </div>
             </header>
 
@@ -427,6 +663,10 @@ export function App() {
                 items={activeProject.items}
                 sessionFilter={sessionFilter}
                 sessions={activeProject.sessions}
+                onAddManualItem={addManualCheckpoint}
+                onCreateSession={createRevision}
+                onDeleteItem={deleteItem}
+                onDeleteSession={deleteSession}
                 onFilterChange={setItemFilter}
                 onSessionFilterChange={setSessionFilter}
                 onUpdate={updateItem}
@@ -451,19 +691,19 @@ export function App() {
                   <label>
                     Modo de importacion
                     <select value={importMode} onChange={(event) => setImportMode(event.target.value as ImportMode)}>
-                      <option value="new-session">Nueva sesion sin duplicar</option>
+                      <option value="new-session">Nueva revision sin duplicar</option>
                       <option value="replace-session" disabled={activeProject.sessions.length === 0}>
-                        Reemplazar sesion
+                        Reemplazar revision
                       </option>
                       <option value="append-deduped" disabled={activeProject.sessions.length === 0}>
-                        Anadir a sesion sin duplicar
+                        Anadir a revision sin duplicar
                       </option>
                     </select>
                   </label>
 
                   {importMode === "new-session" ? (
                     <label>
-                      Nombre de sesion
+                      Nombre de revision
                       <input
                         value={sessionName}
                         onChange={(event) => setSessionName(event.target.value)}
@@ -472,11 +712,11 @@ export function App() {
                     </label>
                   ) : (
                     <label>
-                      Sesion destino
+                      Revision destino
                       <select value={targetSessionId} onChange={(event) => setSelectedSessionId(event.target.value)}>
                         {activeProject.sessions.map((session) => (
                           <option key={session.id} value={session.id}>
-                            {session.name}
+                            {getRevisionOptionLabel(activeProject.sessions, session)}
                           </option>
                         ))}
                       </select>
@@ -508,7 +748,7 @@ export function App() {
                 <div className="sectionHeading">
                   <div>
                     <h2>Ajustes del proyecto</h2>
-                    <p>Gestiona datos musicales, sesiones y acciones de limpieza.</p>
+                    <p>Gestiona datos musicales, revisiones y acciones de limpieza.</p>
                   </div>
                   <button
                     className="iconButton danger"
@@ -564,7 +804,7 @@ export function App() {
                 <div className="dangerZone">
                   <div>
                     <h3>Reset del checklist</h3>
-                    <p>Borra todas las tareas y sesiones de feedback de esta cancion.</p>
+                    <p>Borra todas las tareas y revisiones de esta cancion.</p>
                   </div>
                   <button className="dangerButton" onClick={() => resetChecklist(activeProject.id)}>
                     <Eraser aria-hidden="true" />
@@ -574,20 +814,20 @@ export function App() {
 
                 {activeProject.sessions.length > 0 && (
                   <div className="sessionManager">
-                    <h3>Sesiones de feedback</h3>
+                    <h3>Revisiones</h3>
                     {activeProject.sessions.map((session) => {
                       const sessionItems = activeProject.items.filter((item) => item.sessionId === session.id);
 
                       return (
                         <div className="sessionRow" key={session.id}>
                           <div>
-                            <strong>{session.name}</strong>
+                            <strong>{getRevisionOptionLabel(activeProject.sessions, session)}</strong>
                             <span>
                               {sessionItems.length} puntos /{" "}
                               {new Date(session.importedAt).toLocaleDateString("es-ES")}
                             </span>
                           </div>
-                          <button className="iconButton danger" onClick={() => deleteSession(session.id)} title="Borrar sesion">
+                          <button className="iconButton danger" onClick={() => deleteSession(session.id)} title="Borrar revision">
                             <Trash2 aria-hidden="true" />
                           </button>
                         </div>
@@ -646,11 +886,64 @@ function StatPill({
   );
 }
 
+function ProjectListEntry({
+  active,
+  project,
+  onArchive,
+  onDelete,
+  onRestore,
+  onSelect,
+}: {
+  active: boolean;
+  project: Project;
+  onArchive: () => void;
+  onDelete: () => void;
+  onRestore: () => void;
+  onSelect: () => void;
+}) {
+  const pending = project.items.filter((item) => item.status === "pending").length;
+  const done = project.items.filter((item) => item.status === "done").length;
+  const progress = getProjectCompletion(project);
+
+  return (
+    <article className={`projectListItem ${active ? "active" : ""} ${project.archivedAt ? "archived" : ""}`}>
+      <button className="projectListMain" onClick={onSelect}>
+        <span>{project.songName}</span>
+        <small>{project.artistName}</small>
+        <em>
+          {done}/{project.items.length || 0} hechas / {project.sessions.length} revisiones
+          <ChevronRight aria-hidden="true" />
+        </em>
+      </button>
+      <div className="projectActions">
+        <button
+          className="miniIconButton"
+          onClick={project.archivedAt ? onRestore : onArchive}
+          title={project.archivedAt ? "Restaurar proyecto" : "Archivar proyecto"}
+        >
+          {project.archivedAt ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
+        </button>
+        <button className="miniIconButton danger" onClick={onDelete} title="Eliminar proyecto">
+          <Trash2 aria-hidden="true" />
+        </button>
+      </div>
+      <div className="sidebarProgress" aria-label={`${progress}% completado`}>
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      {pending > 0 && <b>{pending}</b>}
+    </article>
+  );
+}
+
 function ChecklistTable({
   filter,
   items,
   sessionFilter,
   sessions,
+  onAddManualItem,
+  onCreateSession,
+  onDeleteItem,
+  onDeleteSession,
   onFilterChange,
   onSessionFilterChange,
   onUpdate,
@@ -659,10 +952,37 @@ function ChecklistTable({
   items: ChecklistItem[];
   sessionFilter: string;
   sessions: FeedbackSession[];
+  onAddManualItem: (input: ManualCheckpointInput) => void;
+  onCreateSession: () => string;
+  onDeleteItem: (itemId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
   onFilterChange: (filter: ItemFilter) => void;
   onSessionFilterChange: (sessionId: string) => void;
   onUpdate: (itemId: string, patch: Partial<ChecklistItem>) => void;
 }) {
+  const defaultManualSessionId =
+    sessionFilter !== "all" ? sessionFilter : sessions[sessions.length - 1]?.id ?? "";
+  const [isManualOpen, setIsManualOpen] = useState(false);
+  const [manualDraft, setManualDraft] = useState<ManualCheckpointInput>(() =>
+    createEmptyManualCheckpoint(defaultManualSessionId),
+  );
+  const [manualError, setManualError] = useState("");
+
+  useEffect(() => {
+    setManualDraft((current) => {
+      const sessionStillExists = sessions.some((session) => session.id === current.sessionId);
+
+      if (current.sessionId && sessionStillExists) {
+        return current;
+      }
+
+      return {
+        ...current,
+        sessionId: defaultManualSessionId,
+      };
+    });
+  }, [defaultManualSessionId, sessions]);
+
   const visibleItems = items.filter((item) => {
     const matchesSession = sessionFilter === "all" || item.sessionId === sessionFilter;
 
@@ -677,15 +997,43 @@ function ChecklistTable({
     return matchesSession;
   });
 
-  if (items.length === 0) {
-    return (
-      <section className="panel emptyChecklist">
-        <ClipboardList aria-hidden="true" />
-        <h2>Checklist vacia</h2>
-        <p>Importa feedback para generar tareas ordenadas por tiempo, compas y categoria.</p>
-      </section>
-    );
+  function openManualForm() {
+    const sessionId = sessions.length === 0 ? onCreateSession() : defaultManualSessionId;
+    setManualDraft(createEmptyManualCheckpoint(sessionId));
+    setManualError("");
+    setIsManualOpen(true);
   }
+
+  function submitManualItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const description = manualDraft.description.trim();
+    const timecode = manualDraft.timecode.trim();
+
+    if (!description) {
+      setManualError("Escribe la correccion.");
+      return;
+    }
+
+    if (timecode && !parseTimecode(timecode)) {
+      setManualError("Ese tiempo no parece valido.");
+      return;
+    }
+
+    const sessionId = manualDraft.sessionId || defaultManualSessionId || onCreateSession();
+    onAddManualItem({
+      ...manualDraft,
+      sessionId,
+      description,
+      timecode,
+    });
+    setManualDraft(createEmptyManualCheckpoint(sessionId));
+    setManualError("");
+    setIsManualOpen(false);
+  }
+
+  const revisionLabel =
+    sessionFilter === "all" ? "Revisiones" : getRevisionLabel(sessions, sessionFilter);
 
   return (
     <section className="panel checklist">
@@ -694,17 +1042,30 @@ function ChecklistTable({
           <h2>Checklist de mezcla</h2>
           <p>{items.length} correcciones en esta cancion</p>
         </div>
-        <label className="sessionFilter">
-          Sesion
-          <select value={sessionFilter} onChange={(event) => onSessionFilterChange(event.target.value)}>
-            <option value="all">Todas</option>
-            {sessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="revisionControls">
+          <label className="sessionFilter">
+            {revisionLabel}
+            <select value={sessionFilter} onChange={(event) => onSessionFilterChange(event.target.value)}>
+              <option value="all">Todas las revisiones</option>
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {getRevisionOptionLabel(sessions, session)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="iconButton" onClick={onCreateSession} title="Nueva revision">
+            <Plus aria-hidden="true" />
+          </button>
+          <button
+            className="iconButton danger"
+            disabled={sessionFilter === "all" || sessions.length === 0}
+            onClick={() => onDeleteSession(sessionFilter)}
+            title="Borrar revision seleccionada"
+          >
+            <Trash2 aria-hidden="true" />
+          </button>
+        </div>
         <div className="filterGroup" aria-label="Filtro de tareas">
           <ListFilter aria-hidden="true" />
           <button className={filter === "all" ? "active" : ""} onClick={() => onFilterChange("all")}>
@@ -719,63 +1080,148 @@ function ChecklistTable({
         </div>
       </div>
 
-      <div className="taskList">
-        {visibleItems.map((item) => (
-          <article key={item.id} className={`taskRow ${item.status === "done" ? "doneRow" : ""}`}>
-            <button
-              className="statusToggle"
-              onClick={() => onUpdate(item.id, { status: item.status === "done" ? "pending" : "done" })}
-              aria-label={`Marcar ${item.description} como ${item.status === "done" ? "pendiente" : "hecho"}`}
-            >
-              {item.status === "done" && <Check aria-hidden="true" />}
-            </button>
+      {visibleItems.length === 0 ? (
+        <div className="emptyChecklist compact">
+          <ClipboardList aria-hidden="true" />
+          <h2>{items.length === 0 ? "Checklist vacia" : "Sin correcciones con este filtro"}</h2>
+          <p>
+            {items.length === 0
+              ? "Importa feedback o anade un checkpoint manual."
+              : "Cambia el filtro o anade una correccion manual a esta revision."}
+          </p>
+        </div>
+      ) : (
+        <div className="taskList">
+          {visibleItems.map((item) => {
+            const itemRevisionLabel = getRevisionLabel(sessions, item.sessionId);
+            const hasManualTime = item.source === "manual" && item.originalTimecode === "Manual";
 
-            <div className="timeCell">
-              <strong>{item.originalTimecode}</strong>
-              <span>{formatDuration(item.seconds)}</span>
-            </div>
+            return (
+              <article key={item.id} className={`taskRow ${item.status === "done" ? "doneRow" : ""}`}>
+                <button
+                  className="statusToggle"
+                  onClick={() => onUpdate(item.id, { status: item.status === "done" ? "pending" : "done" })}
+                  aria-label={`Marcar ${item.description} como ${item.status === "done" ? "pendiente" : "hecho"}`}
+                >
+                  {item.status === "done" && <Check aria-hidden="true" />}
+                </button>
 
-            <div className="barCell">
-              <Gauge aria-hidden="true" />
-              <span>C{item.bar ?? "-"}</span>
-              <small>P{item.beat ?? "-"}</small>
-            </div>
+                <div className="timeCell">
+                  <strong>{item.originalTimecode}</strong>
+                  <span>{hasManualTime ? "sin tiempo" : formatDuration(item.seconds)}</span>
+                </div>
 
-            <div className={`categoryBadge ${item.category}`}>
-              <select
-                value={item.category}
-                onChange={(event) => onUpdate(item.id, { category: event.target.value as ChecklistCategory })}
-                aria-label="Categoria"
-              >
-                {Object.entries(categoryLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div className="barCell">
+                  <Gauge aria-hidden="true" />
+                  <span>C{item.bar ?? "-"}</span>
+                  <small>P{item.beat ?? "-"}</small>
+                </div>
 
-            <div className="sessionTag">
-              {sessions.find((session) => session.id === item.sessionId)?.name ?? "Feedback"}
-            </div>
+                <div className={`categoryBadge ${item.category}`}>
+                  <select
+                    value={item.category}
+                    onChange={(event) => onUpdate(item.id, { category: event.target.value as ChecklistCategory })}
+                    aria-label="Categoria"
+                  >
+                    {Object.entries(categoryLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <input
-              className="descriptionInput"
-              value={item.description}
-              onChange={(event) => onUpdate(item.id, { description: event.target.value })}
-              aria-label="Descripcion"
-            />
+                <div className="sessionTag">{itemRevisionLabel}</div>
 
-            <input
-              className="notesInput"
-              value={item.notes}
-              onChange={(event) => onUpdate(item.id, { notes: event.target.value })}
-              placeholder="Notas"
-              aria-label="Notas"
-            />
-          </article>
-        ))}
-      </div>
+                <input
+                  className="descriptionInput"
+                  value={item.description}
+                  onChange={(event) => onUpdate(item.id, { description: event.target.value })}
+                  aria-label="Descripcion"
+                />
+
+                <textarea
+                  className="notesInput"
+                  value={item.notes}
+                  onChange={(event) => onUpdate(item.id, { notes: event.target.value })}
+                  placeholder="Notas"
+                  aria-label="Notas"
+                  rows={getNoteRows(item.notes)}
+                />
+
+                <button
+                  className="iconButton danger itemDeleteButton"
+                  onClick={() => onDeleteItem(item.id)}
+                  title="Borrar checkpoint"
+                >
+                  <Trash2 aria-hidden="true" />
+                </button>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {isManualOpen ? (
+        <form className="manualCheckpointForm" onSubmit={submitManualItem}>
+          <select
+            value={manualDraft.sessionId}
+            onChange={(event) => setManualDraft({ ...manualDraft, sessionId: event.target.value })}
+            aria-label="Revision"
+          >
+            {sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {getRevisionOptionLabel(sessions, session)}
+              </option>
+            ))}
+          </select>
+          <input
+            value={manualDraft.timecode}
+            onChange={(event) => setManualDraft({ ...manualDraft, timecode: event.target.value })}
+            placeholder="Tiempo opcional"
+            aria-label="Tiempo opcional"
+          />
+          <input
+            value={manualDraft.description}
+            onChange={(event) => setManualDraft({ ...manualDraft, description: event.target.value })}
+            placeholder="Nueva correccion"
+            aria-label="Nueva correccion"
+          />
+          <select
+            value={manualDraft.category}
+            onChange={(event) =>
+              setManualDraft({ ...manualDraft, category: event.target.value as ChecklistCategory })
+            }
+            aria-label="Categoria"
+          >
+            {Object.entries(categoryLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <textarea
+            value={manualDraft.notes}
+            onChange={(event) => setManualDraft({ ...manualDraft, notes: event.target.value })}
+            placeholder="Notas"
+            aria-label="Notas"
+            rows={2}
+          />
+          {manualError && <p className="manualError">{manualError}</p>}
+          <button className="primaryButton" type="submit">
+            <Plus aria-hidden="true" />
+            Anadir
+          </button>
+          <button className="iconButton" type="button" onClick={() => setIsManualOpen(false)} title="Cancelar">
+            <X aria-hidden="true" />
+          </button>
+        </form>
+      ) : (
+        <button className="addCheckpointButton" onClick={openManualForm}>
+          <Plus aria-hidden="true" />
+          Anadir checkpoint manual
+        </button>
+      )}
     </section>
   );
 }

@@ -1,4 +1,5 @@
 export type ChecklistStatus = "pending" | "done";
+export type ChecklistSource = "feedback" | "manual";
 
 export type ChecklistCategory =
   | "voice"
@@ -21,6 +22,7 @@ export type ChecklistItem = {
   status: ChecklistStatus;
   notes: string;
   fingerprint: string;
+  source: ChecklistSource;
   createdAt: string;
   updatedAt: string;
 };
@@ -41,6 +43,7 @@ export type Project = {
   barOffset: number;
   beatsPerBar: number;
   sessions: FeedbackSession[];
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   items: ChecklistItem[];
